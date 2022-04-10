@@ -69,13 +69,10 @@ func ArchiveZip(inputDir string, maxNum int, outputFilename string) error {
 	defer zipFile.Close()
 
 	zipWriter := zip.NewWriter(zipFile)
-	// zipWriter.RegisterCompressor(zip.Deflate, func(out io.Writer) (io.WriteCloser, error) {
-	// 	return flate.NewWriter(out, flate.DefaultCompression)
-	// })
 	defer zipWriter.Close()
 
-	for i, f := range files {
-		if err := writeOneFile(inputDir, f.Name(), zipWriter); err != nil {
+	for i, fi := range files {
+		if err := writeOneFile(inputDir, fi, zipWriter); err != nil {
 			return err
 		}
 		if i+1 >= maxNum {
@@ -85,20 +82,44 @@ func ArchiveZip(inputDir string, maxNum int, outputFilename string) error {
 	return nil
 }
 
-func writeOneFile(dir, filename string, zipWriter *zip.Writer) error {
-	f, err := os.Open(filepath.Join(dir, filename))
+func writeOneFile(dir string, fi os.DirEntry, zipWriter *zip.Writer) error {
+	f, err := os.Open(filepath.Join(dir, fi.Name()))
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 
-	w, err := zipWriter.Create(filename)
+	info, err := fi.Info()
+	if err != nil {
+		return err
+	}
+	header := fileInfoHeader(info)
+	header.Method = 8
+	w, err := zipWriter.CreateHeader(header)
 	if err != nil {
 		return err
 	}
 
 	_, err = io.Copy(w, f)
 	return err
+}
+
+func fileInfoHeader(fi os.FileInfo) *zip.FileHeader {
+	const uint32max = (1 << 32) - 1
+
+	size := fi.Size()
+	fh := &zip.FileHeader{
+		Name:               fi.Name(),
+		UncompressedSize64: uint64(size),
+	}
+	fh.SetModTime(fi.ModTime())
+	fh.SetMode(fi.Mode())
+	if fh.UncompressedSize64 > uint32max {
+		fh.UncompressedSize = uint32max
+	} else {
+		fh.UncompressedSize = uint32(fh.UncompressedSize64)
+	}
+	return fh
 }
 
 func ArchiveZipByArchiver(inputDir string, maxNum int, outputFilename string) error {
