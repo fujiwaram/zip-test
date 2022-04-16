@@ -3,12 +3,15 @@ package main
 import (
 	"archive/zip"
 	"flag"
+	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
 	"runtime"
 	"runtime/pprof"
+	"strconv"
+	"strings"
 
 	archiver "github.com/mholt/archiver/v3"
 )
@@ -31,14 +34,14 @@ func main() {
 		defer pprof.StopCPUProfile()
 	}
 
-	if err := ArchiveZip("testdata", 10, "test.zip"); err != nil {
+	if err := ArchiveZip("testdata", 1000, "test.zip"); err != nil {
 		log.Println(err)
 		os.Exit(1)
 	}
-	if err := ArchiveZipByArchiver("testdata", 10, "test_archiver.zip"); err != nil {
-		log.Println(err)
-		os.Exit(1)
-	}
+	// if err := ArchiveZipByArchiver("testdata", 10, "test_archiver.zip"); err != nil {
+	// 	log.Println(err)
+	// 	os.Exit(1)
+	// }
 
 	// Memory pprof
 	if *memprofile != "" {
@@ -47,13 +50,51 @@ func main() {
 			log.Fatal("could not create memory profile: ", err)
 		}
 		defer f.Close() // error handling omitted for example
-		runtime.GC()    // get up-to-date statistics
+		// runtime.GC()    // get up-to-date statistics
 		if err := pprof.WriteHeapProfile(f); err != nil {
 			log.Fatal("could not write memory profile: ", err)
 		}
 	}
 
 	os.Exit(0)
+}
+
+func printMemoryStatsHeader() {
+	header := []string{"#", "Alloc", "HeapAlloc", "TotalAlloc", "HeapObjects", "Sys", "NumGC"}
+	fmt.Println(strings.Join(header, ","))
+}
+
+func printMemoryStats(prefix string) {
+	// --------------------------------------------------------
+	// runtime.MemoryStats() から、現在の割当メモリ量などが取得できる.
+	//
+	// まず、データの受け皿となる runtime.MemStats を初期化し
+	// runtime.ReadMemStats(*runtime.MemStats) を呼び出して
+	// 取得する.
+	// --------------------------------------------------------
+	var (
+		ms runtime.MemStats
+	)
+
+	runtime.ReadMemStats(&ms)
+	data := []string{prefix, toKb(ms.Alloc), toKb(ms.HeapAlloc), toKb(ms.TotalAlloc), toKb(ms.HeapObjects), toKb(ms.Sys), strconv.Itoa(int(ms.NumGC))}
+	fmt.Println(strings.Join(data, ","))
+
+	// Alloc は、現在ヒープに割り当てられているメモリ
+	// HeapAlloc と同じ.
+
+	// TotalAlloc は、ヒープに割り当てられたメモリ量の累積
+	// Allocと違い、こちらは増えていくが減ることはない
+
+	// HeapObjects は、ヒープに割り当てられているオブジェクトの数
+
+	// Sys は、OSから割り当てられたメモリの合計量
+
+	// NumGC は、実施されたGCの回数
+}
+
+func toKb(bytes uint64) string {
+	return strconv.FormatUint(bytes/1024, 10)
 }
 
 func ArchiveZip(inputDir string, maxNum int, outputFilename string) error {
@@ -71,6 +112,8 @@ func ArchiveZip(inputDir string, maxNum int, outputFilename string) error {
 	zipWriter := zip.NewWriter(zipFile)
 	defer zipWriter.Close()
 
+	printMemoryStatsHeader()
+
 	for i, fi := range files {
 		if err := writeOneFile(inputDir, fi, zipWriter); err != nil {
 			return err
@@ -78,6 +121,7 @@ func ArchiveZip(inputDir string, maxNum int, outputFilename string) error {
 		if i+1 >= maxNum {
 			break
 		}
+		printMemoryStats(strconv.Itoa(i + 1))
 	}
 	return nil
 }
